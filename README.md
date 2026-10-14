@@ -1,4 +1,4 @@
-# RemoteControl — Session 8 complete (8d: resume + app icons)
+# RemoteControl — Session 8 complete (8d); Session 9 (a+b): remote access; Session 10 (a+b): reliability, security, settings
 
 Modules: `shared` (protocol), `agent` (controlled phone, WebSocket server), `controller` (WebSocket client).
 
@@ -41,7 +41,7 @@ use the debug-only **RC Input Test** launcher icon on the Agent phone to try the
 Logcat `RemoteAgent`: `Input control enabled`; with the service off, incoming input logs `Input ignored: enable the Agent ...`.
 Wire format (JSON, `type` = `INPUT_EVENT`) is documented in `InputCommand.kt`.
 
-## Touch mapping (Session 6, partial)
+## Touch mapping (Session 6, wired in Session 11)
 `TouchInputHandler` + `shared/TouchGesture.kt` turn touches on the live view into `INPUT_EVENT` messages; see the plan's Status Log for the remaining wiring in `ViewerScreen`.
 
 ## Remote wake (Session 7)
@@ -78,6 +78,13 @@ Cancel, a lost link or closing the panel keep the partial; tap the same file aga
 **App icons:** `AppIconLoader` fetches launcher icons on demand (`APP_ICON` -> `APP_ICON_RESULT`, 96 px PNG, 3 requests in flight, memory cache). Needs the small `AppsPanel` edit in `SESSION8D-INTEGRATION.md`; without it the app list simply stays text-only.
 Self-test: logcat `RemoteAgent`: `APP_ICON <pkg> failed` only on errors; Controller: icons appear in the Apps list while scrolling.
 
+## Remote access (Session 9a Controller, 9b Agent)
+Reach the Agent from outside the home Wi-Fi through a **Tailscale** VPN (decision: no relay server). Install Tailscale on both phones, same account, then in the Controller device list use **Remote…** and enter the Agent's Tailscale address (`100.x.y.z`, or its machine name; `host:port` if not 8765).
+On the Agent's Wi-Fi the Controller still dials the local address first; anywhere else it dials the remote address first and falls back to the local one. Only connection failures switch route; a wrong PIN/revoked token is reported as before. The status line shows which route is in use.
+Manual wiring (`ConnectionManager`, device list, `ACCESS_NETWORK_STATE`) and the Tailscale setup steps: `SESSION9A-INTEGRATION.md`. Unit tests: `RouteLogicTest`.
+
+**Agent side (Session 9b):** open **RC Remote Setup** on the Agent phone: it lists the Agent's addresses (VPN / LAN / other), checks that Tailscale is installed, and tests that the Agent answers on every address (a refused VPN address = server bound to one interface or Agent not running). After each successful connection the Controller asks the Agent for its addresses (`ADDRESSES`) and saves the Agent's VPN address as the remote address if none is set (Clear in the Remote dialog switches this off). The status shows `LAN` or `VPN`; over the VPN the ping interval is 15 s. Setup, wiring and the mobile-data test: `SESSION9B-INTEGRATION.md`. Unit tests: `AddressesWireTest`.
+
 ## Verify (logcat)
 - Agent filter `RemoteAgent`: `HELLO from ... (pin|token)` then `Sent HELLO_ACK accepted=true`
 - Controller filter `RemoteController`: `Paired with '...'` (first time), `Handshake OK with '...'`
@@ -90,3 +97,26 @@ Self-test: logcat `RemoteAgent`: `APP_ICON <pkg> failed` only on errors; Control
 artifacts (Actions tab -> run -> Artifacts: `agent-debug-apk`, `controller-debug-apk`).
 Push a tag like `v0.1` to also attach the APKs to a GitHub Release.
 Debug APKs are signed with the auto-generated debug key, so they sideload directly.
+
+## Reliability (Session 10a)
+**RC Reliability Setup** (Agent phone): battery exemption (Unrestricted) with a shortcut to vendor auto-start screens, the *start at boot* switch (the Agent comes back after a restart or app update if it was running; stopping it on purpose keeps it stopped), notification permission and the channel settings. The persistent notification is a minimised, silent, lock-screen-hidden channel (`Agent status`) with one line (`Ready, no controller` / `1 controller connected · screen shared`).
+
+**Cold start, honestly:** after a restart the Agent service can start itself, but screen capture cannot (Android asks for consent every time): start capture once on the Agent phone. With a PIN/pattern nothing runs before the first unlock. Android 15+ may refuse the background start; the Agent then posts a *tap to start* notification.
+
+**Controller:** reconnect backoff is 1 s doubling with jitter (cap 30 s LAN / 60 s VPN; a link that held 20 s starts over), a network change (Wi-Fi <-> mobile data, VPN on/off) retries within about a second, no network shows `No network` instead of retrying, and failures show a readable reason (refused / timeout / unreachable, with a Tailscale hint on the VPN route). Wiring and the checklist: `SESSION10A-INTEGRATION.md`. Unit tests: `ReconnectPolicyTest`, `FailureClassifierTest`, `AgentStatusTextTest`.
+
+## Security & settings (Session 10b)
+**Encryption:** the Agent speaks `wss://` with a self-signed certificate (key in the Android Keystore). The Controller pins the certificate on the first connection; **RC Security** (Agent) shows the fingerprint, the Controller's Settings shows the first 8 bytes of the pinned one: compare them once, on your own network. A changed certificate stops the connection until you reset the pin in Settings. A new Controller can still talk to an Agent from before 10b (badge `PLAIN`) unless **Require encryption** is on; a device that has a pin never downgrades. Update the Controller first, then the Agent. Pairing tokens are stored encrypted (Keystore) once `DeviceStore` uses `TokenVault`.
+
+**Controller Settings:** LAN only (never use the VPN address), Require encryption, screen defaults (fps 1–30, JPEG 20–95, size 480/720/1080/1440, applied on connect if switched on), per device: pinned fingerprint, Reset pin, Re-pair, Forget.
+
+**Hidden viewer:** while the live view is not on screen the Controller tells the Agent (`VIEWER_STATE`) and the Agent stops sending frames (it keeps a cheap cached frame, resumes within about a second, and resumes by itself after 30 s if the Controller vanished). Wiring and the checklist: `SESSION10B-INTEGRATION.md`. Unit tests: `TlsPolicyTest`, `SettingsLogicTest`, `ViewerStateWireTest`, `FailureClassifierTest`.
+
+## What is left
+All source code of the ten sessions is now in this tree and wired together (Session 11: Controller `MainActivity`, `ViewerScreen` touch control and `AppsPanel` icons). What remains cannot be done without a device or network access:
+
+1. Push to GitHub and run Actions: nothing Android-side has been compiled yet (`./gradlew :shared:test assembleDebug`). Expect a few compile errors; fix them from the first CI log.
+2. On-device verification with the checklists in each `SESSION*-INTEGRATION.md` (files 8b to 8d, remote access 9, reliability 10a, TLS pin / settings / stream pause 10b, touch control 6).
+3. Notes for Sessions 1, 8c and 9a were never uploaded; their behaviour is described in `remote-control-app-plan.md`.
+
+Details: **Remaining Work** in `remote-control-app-plan.md`.

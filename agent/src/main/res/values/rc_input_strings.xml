@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="rc_input_service_description">Lets your paired Controller phone tap, swipe, scroll, press Back/Home and type on this phone. Used only while a Controller is connected.</string>
+</resources>

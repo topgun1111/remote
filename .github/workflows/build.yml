@@ -1,0 +1,55 @@
+name: Build APKs
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed only for attaching APKs to a release on tags
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/wrapper-validation@v3
+
+      - uses: gradle/actions/setup-gradle@v3
+
+      - name: Run unit tests (pairing/protocol)
+        run: |
+          chmod +x gradlew
+          ./gradlew :shared:test --stacktrace
+
+      - name: Build debug APKs
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-debug-apk
+          path: agent/build/outputs/apk/debug/*.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: controller-debug-apk
+          path: controller/build/outputs/apk/debug/*.apk
+
+      - name: Attach APKs to GitHub release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            agent/build/outputs/apk/debug/*.apk
+            controller/build/outputs/apk/debug/*.apk

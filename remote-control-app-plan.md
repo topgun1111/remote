@@ -26,7 +26,7 @@ Existing tools (AirDroid, Vysor, scrcpy, TeamViewer QuickSupport) cover parts of
 
 - **Agent app** (controlled phone): MediaProjection (screen capture) → AccessibilityService (input injection) → Device Admin + WakeLock (remote wake) → file access → WebSocket server/client → foreground service tying it together.
 - **Controller app** (your phone): decodes/renders incoming screen frames → captures local touches and maps them to Agent's coordinate space → sends commands → file browser UI → app launcher UI → connection/pairing management.
-- **Relay server** (only if Session 9 picks this path instead of VPN): minimal WebSocket relay, deployed separately (e.g. small VPS), to allow Controller and Agent to find each other off-LAN.
+- **Relay server** (NOT built: Session 9 chose a Tailscale VPN mesh; kept only as a fallback idea): minimal WebSocket relay, deployed separately (e.g. small VPS), to allow Controller and Agent to find each other off-LAN.
 
 ## Tech Decisions
 
@@ -38,7 +38,7 @@ Record final decisions here as they're made — treat this list as the source of
 | Min SDK | ✅ provisional | 26 (Android 8.0), target/compile 34. Raise/lower if a phone needs it |
 | Networking transport | ✅ decided | WebSocket, plain ws:// for now. Agent = Java-WebSocket 1.5.7 server, Controller = OkHttp 4.12 client. TLS in Session 10 |
 | Screen encoding | ✅ decided | JPEG frames (base64 in JSON) to start |
-| Remote access method | ⬜ not yet decided | Relay server vs VPN mesh (Tailscale/WireGuard) |
+| Remote access method | ✅ decided (Session 9) | VPN mesh (Tailscale) on both phones; no relay. The Agent is dialled at its `100.x.y.z` / MagicDNS address; Controller tries LAN first on the Agent's Wi-Fi, remote first elsewhere. Reason: a relay needs a server holding WebSockets open (InfinityFree cannot), a VPS is extra cost and code. Relay stays a fallback idea only if Tailscale is ruled out |
 | Pairing/security | ✅ decided (Session 2) | 6-digit single-use PIN → Agent issues a random 256-bit token; Controller stores it and sends it in `HELLO` from then on. Agent stores only the SHA-256 of each token. PIN regenerates after each pairing and after 5 wrong guesses. Transport encryption still TBD (Session 10) |
 | QR pairing | ⏭ deferred | Session 2 shipped PIN only (no camera/zxing dependency). Revisit in Session 10 if wanted |
 
@@ -64,6 +64,9 @@ Message types for the Controller↔Agent protocol (JSON text frames, discriminat
 - `FILE_WRITE` / `FILE_WRITE_ACK` — (Session 8c, upload) Controller pushes one base64 chunk (`path`,`offset`,`data`,`eof`,`overwrite`,`abort`), Agent acks each (`offset` = bytes stored, `done`); temp file `.name.rcpart` renamed on `eof`; handled before `Protocol.decode`
 - `APP_ICON` / `APP_ICON_RESULT` — (Session 8d) `{"type":"APP_ICON","package","size"}` -> `{"type":"APP_ICON_RESULT","package","ok","png"(base64)}`; one icon per request; handled before `Protocol.decode`
 - `FILE_OP` / `FILE_OP_RESULT` — (Session 8c; 8d adds `op:"partial"` and result field `size`) `op` = `mkdir` (path = parent, name = new folder) / `delete` (recursive, never follows symlinks) / `rename` (path = item, name = new name); handled before `Protocol.decode`
+
+- Session 9a adds **no** wire messages (protocol still v3).
+- `ADDRESSES` / `ADDRESSES_RESULT` — (Session 9b) `{"type":"ADDRESSES"}` -> `{"type":"ADDRESSES_RESULT","port","vpn","addrs":[{"ip","iface","kind":"LAN|VPN|OTHER"}]}`; `kind` is decided by the Agent from Android's VPN networks (not from the 100.64/10 range, which carriers also use); the Controller saves the first VPN address as the device's remote address when none is set; handled before `Protocol.decode`
 
 ## Rough Size Estimate
 
@@ -132,20 +135,51 @@ Each session is meant to be a self-contained unit of work completable in one sit
 - Chunked upload (Controller -> Agent, `FILE_WRITE`/`FILE_WRITE_ACK`), plus polish: new folder / delete / rename with confirmation, resume of interrupted downloads, optional app icons, more storage roots (SD card). (8c)
 - **Deliverable**: Controller can list + launch Agent's apps, and browse/transfer files both ways.
 
-### Session 9 — Remote Access Beyond LAN
-- Finalize approach from Tech Decisions table: relay server vs VPN mesh (VPN/Tailscale recommended as less code if not already decided).
-- If relay: build minimal WebSocket relay (agent/controller connect out, relay pairs by device ID, forwards traffic), deploy to a small VPS.
-- If VPN: adjust connection logic to use VPN-assigned IP, test off-WiFi.
-- Add fallback: try LAN IP first, then relay/VPN address.
+### Session 9 — Remote Access Beyond LAN (split in two: **9a** = Controller-side routing, code written; **9b** = Agent-side helper + auto-fill + verification, code written -> Session 9 complete after on-device verification)
+Approach decided: **VPN mesh (Tailscale)**, no relay (see Tech Decisions).
+- **9a (Controller):** per-device optional remote address (stored in `routes` prefs), `RouteLogic.plan` orders the routes (LAN first when the Controller is on the Agent's subnet, remote first otherwise, LAN as a 1.5 s last resort), `RouteSession` fails over on transport errors only (never after a rejected handshake), `RouteConnector` hooks into `ConnectionManager`, `RouteDialog` to set the address, `LocalNetwork` reads the phone's own Wi-Fi addresses. Pure logic + tests in `shared`. Manual wiring: `SESSION9A-INTEGRATION.md`.
+- **9b (Agent + auto-fill, code written):** `ADDRESSES`/`ADDRESSES_RESULT` message (see Wire Protocol), `AddressesHandler` on the Agent (routed through `FilesHandler`, no `AgentServer` change), "RC Remote Setup" launcher (addresses, Tailscale installed?, per-address connect self-test = bind-all-interfaces check, shortcuts to VPN and battery settings), `AddressesClient` on the Controller (auto-fill of the remote address; never overwrites; respects Clear), LAN/VPN status badge, ping 15 s over the VPN. Mobile-data verification checklist in `SESSION9B-INTEGRATION.md`.
 - **Deliverable**: Controller reaches Agent from outside home WiFi (mobile data test).
 
-### Session 10 — Hardening, Security & Polish
-- Encrypt the connection (TLS over WebSocket, or payload encryption keyed from the pairing secret).
-- Connection timeout/error handling, auto-reconnect with backoff, battery-optimization exemption prompts.
-- Clean up persistent notification (can't be hidden, but keep it unobtrusive).
-- Settings screen: JPEG quality/FPS slider, re-pair/forget device, relay vs LAN-only toggle.
-- Cold-start test: phone rebooted, no services running — confirm Agent recovers properly or document the manual step needed.
+### Session 10 — Hardening, Security & Polish (split in two: **10a** = reliability, code written; **10b** = security + settings, code written -> Session 10 complete after on-device verification)
+- **10a (reliability):** connection timeout/error handling, auto-reconnect with backoff, battery-optimization exemption prompts, unobtrusive persistent notification, cold-start recovery (boot start) with its documented limits.
+- **10b (security + settings, code written):** TLS over WebSocket with a self-signed Keystore certificate pinned by the Controller on first use (plain fallback only for unpinned devices, switchable off); pairing tokens encrypted at rest; settings screen (LAN-only toggle, require-encryption toggle, capture defaults fps/quality/size, per-device pin reset / re-pair / forget); pause of the stream while the viewer is hidden.
 - **Deliverable**: stable personal-use build, ready for daily use.
+
+---
+
+## Remaining Work (as of Session 11)
+
+All source code is written and wired. The app is **not verified** until the items below are done. Order matters.
+
+### 1. Missing sources — resolved
+All Controller and Agent sources are in the tree now (rebuilt where an upload was missing, see Status Log).
+
+### 2. Session 6 wiring — done in Session 11
+`ViewerScreen` sets a `TouchInputHandler` on `ScreenView`, has Back / Home / Recents buttons, a text field with Backspace / Enter, `WakeBar` and the link badge; `ConnectionManager.send(String)` exists. The Agent's debug-only `<service>` problem is gone (merged manifest). `InputEvent` in `Protocol.kt` is not used on the wire (the Agent parses `INPUT_EVENT` with `org.json`); leave it or delete it.
+
+### 3. Integration notes — applied
+All `SESSION*-INTEGRATION.md` edits are in the code (`MainActivity`: Apps / Files / Settings / Wake, Remote address dialog, file picker, viewer visibility; `AppsPanel`: icons). Still to check on a device: the 8b/8c/9a notes' checklists.
+
+### 4. Build
+- Run CI: nothing Android-side has ever been compiled (only the pure `shared` logic and its tests were run locally). Expect compile errors to fix.
+- Set `versionName` by hand: agent and controller 0.10.1 (build files not in the uploads).
+- `./gradlew :shared:test` must pass (includes `ViewerStateWireTest`, not run locally).
+
+### 5. On-device verification (never done for 8b to 10b)
+Run the checklist in each integration note on two real phones: files (8b to 8d), remote access over mobile data (9), reliability and cold start (10a), TLS pin / settings / stream pause (10b).
+
+### 6. Known limits (documented, not bugs)
+- Screen capture cannot resume after reboot or service restart (MediaProjection consent every time).
+- PIN/pattern: nothing starts before the first unlock after boot.
+- Android 15+ (target SDK 35) may refuse a `dataSync` foreground service start from `BOOT_COMPLETED`; tap-to-start notification is the fallback.
+- TLS is trust-on-first-use; regenerating the Agent certificate invalidates all pins.
+- Stream pause is per Agent (last report wins).
+- Pull-based file transfer is slow over mobile data.
+- IPv4 only; release signing not set up (debug APKs only).
+
+### 7. Optional follow-ups (not planned)
+Window of 2 to 4 outstanding file reads over slow links; per-Controller stream pause; automatic re-pin on certificate rotation; Agent foreground-service type that is allowed at boot on Android 15 (e.g. `specialUse`); release signing.
 
 ---
 
@@ -231,3 +265,43 @@ Each session is meant to be a self-contained unit of work completable in one sit
   - Manual edit listed in `SESSION8D-INTEGRATION.md` (icons in `AppsPanel`, whose source was not in the upload). Versions to 0.8.3 in both `build.gradle`s.
   - Deviations/caveats: (1) Upload resume trusts "same Uri + size + last-modified + same target"; a file edited in place without changing size/mtime (rare) could resume into a corrupt result. (2) Partial downloads are not shown anywhere besides the resume status line; there is no "discard partial" button (auto-removed after 7 days). (3) Download resume requires the Agent's listing size/mtime to be unchanged; otherwise it restarts (by design). (4) Icons are cached in memory only (per panel), flattened PNGs, no per-Agent disk cache. (5) A tiny copy step at the end of a download (partial -> Downloads) doubles the disk write for the last moment; fine for phones, noticeable for multi-GB files.
   - Next: verify (download a large file, stop it at ~50%, restart: status says resuming and the final size matches; change the file on the Agent and retry: restarts; upload a large file, switch WiFi off mid-way, back on, pick the same file: resumes and the Agent file is complete; Apps list icons), then the open Session 6 wiring, then Session 9.
+
+- **Session 9a — code written (needs on-device verification; not compiled in the authoring sandbox — CI is the compile check). First half of Session 9: Controller-side routing for remote access. Built on the 8d state; Session 6 wiring is STILL OPEN.**
+  - **Decision:** VPN mesh (Tailscale) instead of a relay; recorded in Tech Decisions. No wire change (protocol v3), no Agent change in 9a.
+  - `shared`: `RouteLogic.kt` (`Route`, `RouteKind`, `AddressClass`, `LocalAddr`; strict IPv4 parse, address classification incl. Tailscale's 100.64.0.0/10, endpoint parser for `host[:port]` with `ws://`/path tolerated, subnet check, `plan` = ordered routes with per-route connect timeouts, `describe`) and `RouteSession` (walks the routes of one cycle: `failed()` -> next or null, `succeeded()`); `RouteLogicTest` added (CI already runs `:shared:test`).
+  - `controller`: `RouteStore` (per-device remote endpoint + last good route, prefs `routes`, key = `host:port` paired with), `LocalNetwork` (own Wi-Fi/Ethernet IPv4 addresses via `ConnectivityManager.allNetworks`, VPN networks skipped because with Tailscale on `activeNetwork` is the VPN), `RouteConnector` (begin / failed / succeeded / restart + status texts + `clientFor` per-attempt connect timeout), `RouteDialog` (set/clear the remote address with a live hint).
+  - Manual edits listed in `SESSION9A-INTEGRATION.md` (`ACCESS_NETWORK_STATE`, `ConnectionManager` hooks, a "Remote…" item in the device list; `ConnectionManager.kt`, `MainActivity.kt`, `DeviceStore.kt` were not in the upload). Version 0.9.0 for the Controller to be set by hand (build files not in the upload).
+  - Deviations/caveats: (1) The remote address is typed by hand in 9a; auto-fill comes with 9b. (2) Routes fail over on transport failures only; a rejected handshake stays terminal as in Session 2. (3) A common subnet such as 192.168.1.x on a different home network costs up to 4 s before the remote route is tried. (4) Traffic is still plain ws:// (inside Tailscale it is encrypted by the tunnel; app-level TLS is Session 10). (5) The Agent must bind all interfaces for the VPN address to work (to be checked in `AgentServer`, which was not in the upload). (6) Pull-based file transfer (8b) will be slower over mobile data/relayed Tailscale paths: a small window of outstanding reads is a possible follow-up. (7) Only IPv4; IPv6 endpoints are rejected by the parser.
+  - Next: wire it in (`SESSION9A-INTEGRATION.md`), verify (same Wi-Fi -> status `Local network ...`; Wi-Fi off + Tailscale on -> `Remote (VPN address ...)`; wrong remote address -> LAN still works; Agent off -> all routes fail then backoff), then Session 9b.
+
+- **Session 9b — code written (needs on-device verification; not compiled in the authoring sandbox — CI is the compile check). Second half of Session 9: Agent-side helper + automatic remote address. Session 9 is complete after verification. Session 6 wiring is STILL OPEN.**
+  - `shared`: `AddressesWire.kt` (`ADDRESSES`, `ADDRESSES_RESULT`, `AgentAddress`, `AddressesResult`, tolerant parser: bad IPs dropped, unknown kinds -> `OTHER`, max 16, `suggestRemote`); `AddressesWireTest` added. Protocol still v3.
+  - `agent`: `AddressesHandler` (VPN addresses from `TRANSPORT_VPN` networks, other interfaces via `NetworkInterface`; created by `FilesHandler`, so `AgentServer` is untouched), `RemoteSetupActivity` ("RC Remote Setup": addresses, Tailscale installed, connect test through every address, shortcuts), `FilesHandler` (+2 lines).
+  - `controller`: `AddressesClient` (request after handshake, auto-fill rules), `RouteStore` (+ auto-fill switch: Clear turns it off for that device), `RouteConnector` (+ `key()`, `badge()`, ping 10 s LAN / 15 s VPN in `clientFor`), `FilesHub` (+ `ADDRESSES_RESULT`).
+  - Manual edits in `SESSION9B-INTEGRATION.md` (agent manifest: network-state permission, `<queries>` for Tailscale, setup activity; `ConnectionManager`: one client + one call after the handshake; badge in the UI). Versions 0.9.0 (build files not in the upload).
+  - Deviations/caveats: (1) The Agent decides `VPN` from Android's VPN networks, so another VPN app (e.g. WireGuard) would also be suggested; fine for a personal setup. (2) Auto-fill assumes the connected, authenticated Agent is the right device; only an unset address is filled. (3) Tailscale can be stopped by Doze/OEM battery managers; no Agent-side fix, only the setup hints. (4) Pull-based file chunks are slow over mobile data (window of outstanding reads is a possible follow-up, not done). (5) IPv4 only. (6) Still plain ws:// (encrypted inside the Tailscale tunnel; app-level TLS is Session 10).
+  - Next: wire in (`SESSION9A/9B-INTEGRATION.md`), verify the mobile-data checklist, then the open Session 6 wiring, then Session 10.
+
+- **Session 10a — code written (needs on-device verification; not compiled in the authoring sandbox — CI is the compile check; the pure `shared` logic and its tests were compiled and run with a local Kotlin compiler: all pass). First half of Session 10: reliability. Built on the 9b state; Session 6 wiring is STILL OPEN. No wire change.**
+  - `shared`: `ReconnectPolicy.kt` (backoff 1 s doubling, +-20 % jitter, cap 30 s LAN / 60 s VPN, a link up >= 20 s resets the counter, 300 ms retry after a network change), `FailureClassifier.kt` (transport exception -> kind, retry flag, readable text with a VPN-specific hint; TLS failures are marked not retryable for 10b), `AgentStatusText.kt` (notification line); tests `ReconnectPolicyTest`, `FailureClassifierTest`, `AgentStatusTextTest`.
+  - `agent`: `AutoStart` (own prefs `agent_autostart`: switch + was-running flag + last boot outcome), `BootReceiver` (`BOOT_COMPLETED` / `MY_PACKAGE_REPLACED` -> start `AgentService` only if the switch is on and the Agent was running; catches refusal and posts a tap-to-start notification), `BatteryHelper` (exemption check + request dialog + list/app-details fallbacks + best-effort vendor auto-start screens), `AgentNotification` (new minimised silent channel `agent_status_min`, hidden on the lock screen, deletes the old channel ids, status text updates, start prompt), `ReliabilitySetupActivity` ("RC Reliability Setup": battery, start-at-boot switch, notification permission and channel settings, boot self-test, cold-start checklist).
+  - `controller`: `NetworkWatcher` (default-network callback, debounced: retry at once on a network change, "No network" instead of retry spam), `RouteConnector` (+ `remoteLikely()` for the backoff cap).
+  - Manual edits in `SESSION10A-INTEGRATION.md` (agent manifest; three `AgentService` edits; `ConnectionManager` backoff / failure text / network hook). `AgentService`, `AgentServer`, `ConnectionManager` were not in the upload. Versions 0.10.0 (build files not in the upload).
+  - Deviations/caveats: (1) Screen capture cannot resume after a reboot (MediaProjection consent), the Controller sees capture off until someone starts it on the Agent. (2) Android 15+ (target SDK 35) forbids a `dataSync` foreground service start from `BOOT_COMPLETED`: handled by the tap-to-start notification; a real fix needs another service type (not done). (3) With a PIN/pattern nothing starts before the first unlock. (4) The boot self-test runs from the foreground, so only a real reboot verifies the boot path. (5) Vendor auto-start screens are best effort. (6) The old notification channel ids must be passed to `ensureChannels` by hand (unknown in the upload). (7) Controller does not hold a foreground service; reconnect logic only runs while the app process lives.
+  - Next: wire in (`SESSION10A-INTEGRATION.md`), verify (notification, battery exemption, reboot with Agent running / stopped on purpose / switch off, Wi-Fi -> mobile switch, Agent kill and restart), then Session 10b, then the open Session 6 wiring.
+
+- **Session 10b — code written (needs on-device verification; not compiled in the authoring sandbox — CI is the compile check; the pure `shared` logic (`TlsPolicy`, `SettingsLogic`, `StreamGateLogic`, `FailureClassifier`) and its tests were compiled and run with a local Kotlin compiler: 22 tests pass; `ViewerStateWire` (kotlinx.serialization) and everything Android-side were not compiled). Second half of Session 10: security + settings. Built on the 10a state; Session 6 wiring is STILL OPEN.**
+  - **Decision:** TLS over WebSocket (wss://), not payload encryption. The Agent has one self-signed EC P-256 certificate whose key lives in the Android Keystore; the Controller pins its SHA-256 fingerprint on first use (trust on first use). Plain `ws://` fallback only for a device without a pin and only while "Require encryption" is off; a pinned device never downgrades.
+  - `shared`: `TlsPolicy` (fingerprint, constant-time match, display, fallback/terminal decision), `FailureClassifier` (+ `TLS_PIN`, `TLS_PLAIN`), `SettingsLogic` (ranges, size presets), `StreamGateLogic` (pause rule with 10 s heartbeat, 30 s expiry), `ViewerStateWire` (`VIEWER_STATE`, protocol still v3); tests `TlsPolicyTest`, `SettingsLogicTest` (+ `StreamGateLogicTest`), `ViewerStateWireTest`, `FailureClassifierTest` extended.
+  - `agent`: `TlsIdentity` (Keystore key, certificate, fingerprint, regenerate, `DefaultSSLWebSocketServerFactory`), `SecuritySetupActivity` ("RC Security": on/off, fingerprint, new certificate), `StreamGate` + `ViewerStateHandler` (routed by `FilesHandler`, no `AgentServer` hook for it).
+  - `controller`: `SecureDial` (+ `PinTrust`, `PinMismatchException`, `DialAttempt`: wss URL, pinned client, pin saved only after the handshake was accepted, plain fallback / terminal stop), `SettingsStore`, `SettingsPanel` (LAN only, Require encryption, capture defaults applied on connect if switched on, per-device pin / reset pin / re-pair / forget), `TokenVault` (AES-GCM, Keystore key, reads old plain tokens), `ViewerStateClient`, `RouteConnector` (LAN-only filter).
+  - Manual edits in `SESSION10B-INTEGRATION.md` (Agent manifest + `AgentServer` TLS factory + `ScreenCapturer` pause condition; `ConnectionManager` dial/accepted/failure code; `MainActivity` settings button and viewer visibility; `DeviceStore` token vault). Versions 0.10.1.
+  - Deviations/caveats: (1) Trust on first use: a man in the middle at the very first connection would be pinned; compare fingerprints (RC Security vs Settings) on your own network. (2) The plain-Agent detection is heuristic (reset or wrong-version during the handshake) and only applies to unpinned devices. (3) Regenerating the certificate or reinstalling the Agent invalidates all pins. (4) The stream pause is per Agent (last report wins). (5) "Relay vs LAN-only" became only "LAN only" since the relay was dropped in Session 9. (6) Capture defaults need the viewer's existing send call (its code was not in the upload). (7) Update the Controller before the Agent.
+  - Next: wire in (`SESSION10A/10B-INTEGRATION.md`), verify on devices, then the open Session 6 wiring. Session 10 is then complete: stable personal-use build.
+
+- **Session 11 — Controller wiring finished (not compiled: the sandbox has no Android SDK / Maven; the first CI run is the compile check).**
+  - `MainActivity` rewritten for the new `ConnectionManager(context, store, listener)`: screens Connection / Viewer / Apps / Files / Settings (Back returns to the connection screen); Apps and Files buttons enabled only while connected; `WakeBar` on the connection screen; per device Connect / Remote… (`RouteDialog`) / Forget (`manager.forget`); `LAN · TLS` badge in the status line; `onInfo` goes to the log; file picker (`ACTION_OPEN_DOCUMENT` -> `FilesPanel.onFilePicked`); `SettingsPanel.Host` (devices / forget / repair / close); `manager.setViewerVisible(viewerShown && resumed)` on every screen / resume / pause change and once at start; `manager.shutdown()` in `onDestroy`.
+  - `ViewerScreen`: new parameters `send` and `badge`; `TouchInputHandler` (slop 8 dp) as touch listener of `ScreenView` (new `ScreenView.frameSize`); Back / Home / Recents bar; text field + Backspace / Enter; `WakeBar` in the Controls panel; badge in the stats line; short hint when a touch is not sent. The top-left button is now "Exit" (leaves the viewer) to avoid mixing it up with the Agent's Back key.
+  - `AppsPanel`: icon per row via `AppIconLoader` (start / stop on attach / detach), custom row instead of `simple_list_item_2`.
+  - `ConnectionManager.targets(device)` added (used by Re-pair).
+  - Still open: first CI build, on-device verification (all checklists), notes for Sessions 1 / 8c / 9a never uploaded.

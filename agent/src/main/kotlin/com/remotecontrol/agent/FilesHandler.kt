@@ -22,6 +22,7 @@ import java.io.RandomAccessFile
 import java.util.concurrent.Executors
 
 /**
+ * Also routes `APP_ICON` (8d), `ADDRESSES` (9b) and `VIEWER_STATE` (10b) to their handlers, so `AgentServer` keeps its single hook.
  * Handles `FILE_LIST`, `FILE_READ` (Session 8b) and `FILE_WRITE`, `FILE_OP` (Session 8c). Browsing covers the shared
  * "Internal storage" plus any mounted SD card / USB volume (8c). Every path is normalised and its canonical
  * (symlink-resolved) form must stay inside a root; delete/rename act on the link itself and never follow symlinks.
@@ -34,6 +35,8 @@ class FilesHandler(context: Context) {
     private val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "rc-files").apply { isDaemon = true } }
 
     private val icons = AppIconsHandler(app)
+    private val addresses = AddressesHandler(app)
+    private val viewerState = ViewerStateHandler()
 
     private class Root(val label: String, val dir: File)
 
@@ -43,6 +46,8 @@ class FilesHandler(context: Context) {
      */
     fun tryHandle(raw: String, reply: (String) -> Unit): Boolean {
         if (raw.contains("APP_ICON") && icons.tryHandle(raw, reply)) return true
+        if (raw.contains("ADDRESSES") && addresses.tryHandle(raw, reply)) return true
+        if (raw.contains("VIEWER_STATE") && viewerState.tryHandle(raw)) return true
         if (!raw.contains("FILE_")) return false
         FilesWire.parseListRequest(raw)?.let { path ->
             worker.execute { reply(FilesWire.listResult(safely(path) { list(path) })) }
