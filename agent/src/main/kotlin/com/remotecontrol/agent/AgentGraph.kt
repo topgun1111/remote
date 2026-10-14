@@ -33,15 +33,18 @@ object AgentGraph {
         context.applicationContext.getSharedPreferences("agent_settings", Context.MODE_PRIVATE)
 
     /** Best-effort LAN IPv4 address of this phone (null if not on a private network). */
-    fun localIpv4(): String? = try {
-        Collections.list(NetworkInterface.getNetworkInterfaces() ?: return null)
-            .filter { it.isUp && !it.isLoopback }
-            .flatMap { Collections.list(it.inetAddresses) }
-            .filterIsInstance<Inet4Address>()
-            .firstOrNull { it.isSiteLocalAddress }
-            ?.hostAddress
-    } catch (e: Exception) {
-        null
+    fun localIpv4(): String? {
+        return try {
+            val ifaces = NetworkInterface.getNetworkInterfaces() ?: return null
+            Collections.list(ifaces)
+                .filter { it.isUp && !it.isLoopback }
+                .flatMap { Collections.list(it.inetAddresses) }
+                .filterIsInstance<Inet4Address>()
+                .firstOrNull { it.isSiteLocalAddress }
+                ?.hostAddress
+        } catch (e: Exception) {
+            null
+        }
     }
 }
 

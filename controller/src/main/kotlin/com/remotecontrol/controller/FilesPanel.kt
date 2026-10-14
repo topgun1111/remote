@@ -153,8 +153,9 @@ class FilesPanel(
         note = ""
     }
 
-    private fun showProgress(name: String, done: Long, total: Long) =
+    private fun showProgress(name: String, done: Long, total: Long) {
         status((if (client.uploading) "Uploading " else "Downloading ") + FilesLogic.progressText(name, done, total))
+    }
 
     private fun showDone(name: String, location: String) {
         cancelBtn.visibility = View.GONE

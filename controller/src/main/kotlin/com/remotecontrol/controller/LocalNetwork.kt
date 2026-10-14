@@ -2,9 +2,9 @@ package com.remotecontrol.controller
 
 import android.content.Context
 import android.net.ConnectivityManager
-import android.net.Inet4Address
 import android.net.NetworkCapabilities
 import com.remotecontrol.shared.LocalAddr
+import java.net.Inet4Address
 
 /**
  * Session 9a: this phone's own IPv4 addresses on Wi-Fi / Ethernet, with prefix lengths, so `RouteLogic.plan` can tell
