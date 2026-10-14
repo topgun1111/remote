@@ -58,7 +58,8 @@ class SecureDial(private val settings: SettingsStore) {
         object Normal : Outcome()
     }
 
-    fun begin(key: String): DialAttempt = DialAttempt(key, true, PinTrust(settings.pin(key)))
+    // Open mode (home use): always plain ws://, no certificate pinning.
+    fun begin(key: String): DialAttempt = DialAttempt(key, false, null)
 
     fun client(base: OkHttpClient, route: Route, a: DialAttempt): OkHttpClient {
         val c = RouteConnector.clientFor(base, route)

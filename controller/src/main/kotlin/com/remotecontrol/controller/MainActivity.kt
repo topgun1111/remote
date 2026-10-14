@@ -292,50 +292,31 @@ class MainActivity : Activity(), ConnectionManager.Listener {
             setPadding(0, dp(6), 0, dp(6))
         }
         box.addView(TextView(this).apply {
-            text = (if (paired != null) "${paired.name} (paired)" else "New device") + "\n${f.host}:${f.port}  " +
-                (if (f.tls) "encrypted" else "not encrypted") + "  ${f.connectMs} ms" +
+            text = (if (paired != null) "${paired.name} (known)" else "Agent") + "\n${f.host}:${f.port}  " +
+                "open" + "  ${f.connectMs} ms" +
                 (f.fingerprint?.let { "\ncertificate ${com.remotecontrol.shared.TlsPolicy.short(it)}" } ?: "")
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
         })
         box.addView(Button(this).apply {
-            text = if (paired != null) "Connect" else "Pair..."
+            text = "Connect"
             isAllCaps = false
-            setOnClickListener { if (paired != null) manager.connect(paired) else askPin(f.host, f.port) }
+            setOnClickListener { if (paired != null) manager.connect(paired) else manager.pair(f.host, f.port, OPEN_PIN) }
         })
         nearbyBox.addView(box)
         // A paired Agent that answers on its stored address and nothing is connected yet: connect to it once.
         if (paired != null && manager.connectedDeviceId == null && autoTried.add(paired.key)) {
             log("Found ${paired.name}, connecting...")
             manager.connect(paired)
+        } else if (paired == null && manager.connectedDeviceId == null && store.list().isEmpty() && autoTried.add("first")) {
+            log("Found ${f.host}, connecting...")
+            manager.pair(f.host, f.port, OPEN_PIN)   // open mode: no PIN, so the first Agent found is paired and connected automatically
         }
-    }
-
-    private fun askPin(host: String, port: Int) {
-        val input = EditText(this).apply {
-            hint = "6-digit PIN"
-            inputType = InputType.TYPE_CLASS_NUMBER
-        }
-        AlertDialog.Builder(this)
-            .setTitle("Pair with $host")
-            .setMessage("Enter the PIN shown on that phone's Agent screen.")
-            .setView(input)
-            .setPositiveButton("Pair") { _, _ ->
-                val pin = input.text.toString().replace(" ", "").trim()
-                if (pin.length == 6) manager.pair(host, port, pin) else statusView.text = "Enter the 6-digit PIN shown on the Agent"
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
     }
 
     private fun pairClicked() {
         val host = hostInput.text.toString().trim()
         val port = portInput.text.toString().trim().toIntOrNull() ?: DEFAULT_PORT
-        val pin = pinInput.text.toString().replace(" ", "").trim()
-        when {
-            host.isEmpty() -> statusView.text = "Enter the Agent's IP address"
-            pin.length != 6 -> statusView.text = "Enter the 6-digit PIN shown on the Agent"
-            else -> manager.pair(host, port, pin)
-        }
+        if (host.isEmpty()) statusView.text = "Enter the Agent's IP address" else manager.pair(host, port, OPEN_PIN)
     }
 
     private fun buildUi() {
@@ -394,6 +375,7 @@ class MainActivity : Activity(), ConnectionManager.Listener {
         pinInput = EditText(this).apply {
             hint = "6-digit PIN from the Agent"
             inputType = InputType.TYPE_CLASS_NUMBER
+            visibility = View.GONE   // open mode: no PIN needed
         }
         root.addView(hostInput)
         root.addView(portInput)
@@ -434,5 +416,6 @@ class MainActivity : Activity(), ConnectionManager.Listener {
 
     private companion object {
         const val REQ_PICK_FILE = 4711
+        const val OPEN_PIN = "000000"   // ignored by the Agent in open mode
     }
 }

@@ -40,11 +40,7 @@ class AgentServer(
     init {
         isReuseAddr = true
         connectionLostTimeout = 15 // drop dead peers so a reconnecting Controller isn't blocked
-        // Session 10b: wss:// with the Agent's own certificate. A pinned Controller refuses plain; an unpinned one falls back.
-        if (TlsIdentity.enabled(context)) {
-            try { setWebSocketFactory(TlsIdentity.serverFactory()) }
-            catch (e: Exception) { Log.e(TAG, "TLS unavailable, staying plain: $e") }
-        }
+        // Open mode (home use): plain ws://, no certificate. Anyone on the same network can connect (see handleHello).
         // The viewer came back after being hidden: replay the cached frame at once.
         StreamGate.onResume = { ScreenCapturer.current?.requestKeyframe()?.let { sendFrame(it) } }
     }
@@ -100,31 +96,15 @@ class AgentServer(
 
     private fun handleHello(conn: WebSocket, hello: Hello) {
         Log.i(TAG, "HELLO from '${hello.deviceName}' (${if (hello.token != null) "token" else "pin"})")
-        when (val result = authority.authenticate(hello)) {
-            is AuthResult.Accepted -> {
-                authenticated.add(conn)
-                notifyControllers()
-                conn.send(Protocol.encode(HelloAck(true, deviceName, token = result.newToken)))
-                Log.i(TAG, "Sent HELLO_ACK accepted=true")
-                sendStatus(conn)
-                StreamGate.report(true)   // a new link starts with a visible viewer (a stale pause from an earlier link must not stick)
-                ScreenCapturer.current?.requestKeyframe()?.let { try { conn.send(it) } catch (_: Exception) {} }
-                AgentLog.add(
-                    if (result.newToken != null) "Paired with '${hello.deviceName}'"
-                    else "'${hello.deviceName}' connected"
-                )
-            }
-            is AuthResult.Rejected -> {
-                conn.send(
-                    Protocol.encode(
-                        HelloAck(false, deviceName, error = result.reason, needsPairing = result.needsPairing)
-                    )
-                )
-                Log.i(TAG, "Sent HELLO_ACK accepted=false (${result.reason})")
-                AgentLog.add("Rejected '${hello.deviceName}': ${result.reason}")
-                conn.close(1008, "rejected")
-            }
-        }
+        // Open mode (home use): every Controller on the network is accepted, no PIN, no token check.
+        authenticated.add(conn)
+        notifyControllers()
+        conn.send(Protocol.encode(HelloAck(true, deviceName, token = "open")))
+        Log.i(TAG, "Sent HELLO_ACK accepted=true")
+        sendStatus(conn)
+        StreamGate.report(true)   // a new link starts with a visible viewer (a stale pause from an earlier link must not stick)
+        ScreenCapturer.current?.requestKeyframe()?.let { try { conn.send(it) } catch (_: Exception) {} }
+        AgentLog.add("'${hello.deviceName}' connected")
     }
 
     private fun handleAuthenticated(conn: WebSocket, msg: com.remotecontrol.shared.Message) {

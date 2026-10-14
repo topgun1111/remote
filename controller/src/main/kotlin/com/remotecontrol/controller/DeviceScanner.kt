@@ -114,18 +114,8 @@ class DeviceScanner(private val context: Context) {
             return null
         }
         val ms = (System.nanoTime() - t0) / 1_000_000
-        val trust = FpTrust()
-        return try {
-            s.soTimeout = 2500
-            val ctx = SSLContext.getInstance("TLS").apply { init(null, arrayOf(trust), null) }
-            val ssl = ctx.socketFactory.createSocket(s, host, port, true) as SSLSocket
-            ssl.startHandshake()
-            Found(host, port, true, trust.fp, ms)
-        } catch (e: Exception) {
-            Found(host, port, false, null, ms)     // port open but no TLS: an Agent with encryption off (or another service)
-        } finally {
-            try { s.close() } catch (_: Exception) {}
-        }
+        try { s.close() } catch (_: Exception) {}
+        return Found(host, port, false, null, ms)   // open mode: an open port is enough, no TLS test
     }
 
     private fun toLong(ip: String): Long? {
