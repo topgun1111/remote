@@ -1,6 +1,7 @@
 package com.remotecontrol.controller
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.os.Bundle
@@ -51,6 +52,10 @@ class MainActivity : Activity(), ConnectionManager.Listener {
     private lateinit var portInput: EditText
     private lateinit var pinInput: EditText
     private lateinit var logView: TextView
+    private lateinit var scanner: DeviceScanner
+    private lateinit var nearbyBox: LinearLayout
+    private lateinit var scanStatus: TextView
+    private val autoTried = HashSet<String>()
     private val logLines = ArrayDeque<String>()
 
     private val settingsHost = object : SettingsPanel.Host {
@@ -79,6 +84,7 @@ class MainActivity : Activity(), ConnectionManager.Listener {
         super.onCreate(savedInstanceState)
         store = DeviceStore(this)
         manager = ConnectionManager(this, store, this)
+        scanner = DeviceScanner(this)
         viewer = ViewerScreen(
             this,
             onBack = { showConnection() },
@@ -91,6 +97,7 @@ class MainActivity : Activity(), ConnectionManager.Listener {
         refreshDevices()
 
         store.lastUsed()?.let { manager.connect(it) } // auto-reconnect to the remembered Agent
+        startScan()                                    // and look for Agents on the Wi-Fi by itself
     }
 
     override fun onResume() {
@@ -106,6 +113,7 @@ class MainActivity : Activity(), ConnectionManager.Listener {
     }
 
     override fun onDestroy() {
+        scanner.cancel()
         manager.shutdown()
         super.onDestroy()
     }
@@ -224,6 +232,8 @@ class MainActivity : Activity(), ConnectionManager.Listener {
     override fun onPaired(device: PairedDevice) {
         pinInput.setText("")
         log("Pairing saved for ${device.name}")
+        refreshDevices()
+        startScan()
     }
 
     override fun onInfo(text: String) = log(text)
@@ -261,6 +271,60 @@ class MainActivity : Activity(), ConnectionManager.Listener {
             box.addView(row)
             devicesBox.addView(box)
         }
+    }
+
+    // --- automatic discovery ---
+
+    private fun startScan() {
+        nearbyBox.removeAllViews()
+        scanStatus.text = "Scanning this Wi-Fi for Agents..."
+        scanner.scan(DEFAULT_PORT, object : DeviceScanner.Listener {
+            override fun onFound(found: DeviceScanner.Found) = addNearby(found)
+            override fun onProgress(done: Int, total: Int) { scanStatus.text = "Scanning this Wi-Fi... $done / $total" }
+            override fun onFinished(count: Int, message: String) { scanStatus.text = message; log(message) }
+        })
+    }
+
+    private fun addNearby(f: DeviceScanner.Found) {
+        val paired = store.byKey("${f.host}:${f.port}")
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(6), 0, dp(6))
+        }
+        box.addView(TextView(this).apply {
+            text = (if (paired != null) "${paired.name} (paired)" else "New device") + "\n${f.host}:${f.port}  " +
+                (if (f.tls) "encrypted" else "not encrypted") + "  ${f.connectMs} ms" +
+                (f.fingerprint?.let { "\ncertificate ${com.remotecontrol.shared.TlsPolicy.short(it)}" } ?: "")
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+        })
+        box.addView(Button(this).apply {
+            text = if (paired != null) "Connect" else "Pair..."
+            isAllCaps = false
+            setOnClickListener { if (paired != null) manager.connect(paired) else askPin(f.host, f.port) }
+        })
+        nearbyBox.addView(box)
+        // A paired Agent that answers on its stored address and nothing is connected yet: connect to it once.
+        if (paired != null && manager.connectedDeviceId == null && autoTried.add(paired.key)) {
+            log("Found ${paired.name}, connecting...")
+            manager.connect(paired)
+        }
+    }
+
+    private fun askPin(host: String, port: Int) {
+        val input = EditText(this).apply {
+            hint = "6-digit PIN"
+            inputType = InputType.TYPE_CLASS_NUMBER
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Pair with $host")
+            .setMessage("Enter the PIN shown on that phone's Agent screen.")
+            .setView(input)
+            .setPositiveButton("Pair") { _, _ ->
+                val pin = input.text.toString().replace(" ", "").trim()
+                if (pin.length == 6) manager.pair(host, port, pin) else statusView.text = "Enter the 6-digit PIN shown on the Agent"
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun pairClicked() {
@@ -306,7 +370,18 @@ class MainActivity : Activity(), ConnectionManager.Listener {
             setOnClickListener { manager.disconnect() }
         })
 
-        root.addView(heading("Add device"))
+        root.addView(heading("Nearby devices"))
+        scanStatus = TextView(this).apply { text = "Scanning..." }
+        root.addView(scanStatus)
+        nearbyBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        root.addView(nearbyBox)
+        root.addView(Button(this).apply {
+            text = "Scan again"
+            isAllCaps = false
+            setOnClickListener { startScan() }
+        })
+
+        root.addView(heading("Add device manually"))
         hostInput = EditText(this).apply {
             hint = "Agent IP (e.g. 192.168.1.20)"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI

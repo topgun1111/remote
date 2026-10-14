@@ -38,6 +38,7 @@ object AgentGraph {
             val ifaces = NetworkInterface.getNetworkInterfaces() ?: return null
             Collections.list(ifaces)
                 .filter { it.isUp && !it.isLoopback }
+                .sortedBy { if (it.name.startsWith("wlan")) 0 else 1 }   // prefer the Wi-Fi interface over hotspot/VPN ones
                 .flatMap { Collections.list(it.inetAddresses) }
                 .filterIsInstance<Inet4Address>()
                 .firstOrNull { it.isSiteLocalAddress }
