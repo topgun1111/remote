@@ -3,12 +3,11 @@ name: Build APKs
 on:
   push:
     branches: [main, master]
-    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
 permissions:
-  contents: write   # needed only for attaching APKs to a release on tags
+  contents: read
 
 jobs:
   build:
@@ -40,10 +39,3 @@ jobs:
         with:
           name: remotecontrol-debug-apk
           path: app/build/outputs/apk/debug/*.apk
-
-      - name: Attach APK to GitHub release (tags only)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            app/build/outputs/apk/debug/*.apk

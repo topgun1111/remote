@@ -1,0 +1,100 @@
+name: Release
+
+# Two ways to make a release:
+#  1. Actions -> Release -> Run workflow: pick patch / minor / major. The version in version.properties is bumped,
+#     the APK is built, the change is committed, tagged vX.Y.Z and published as a GitHub Release.
+#  2. Push a tag yourself (git tag v1.2.3 && git push --tags): that exact version is built and published.
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Which part of the version to increase
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      notes:
+        description: Release notes (optional; the commit list is added automatically)
+        required: false
+        default: ''
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v3
+
+      - name: Work out the version
+        id: v
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            V="${GITHUB_REF_NAME#v}"
+            NEW=false
+          else
+            CUR=$(grep '^VERSION_NAME=' version.properties | cut -d= -f2 | tr -d '\r ')
+            IFS=. read -r MA MI PA <<< "${CUR%%-*}"
+            case "${{ inputs.bump }}" in
+              major) MA=$((MA+1)); MI=0; PA=0 ;;
+              minor) MI=$((MI+1)); PA=0 ;;
+              *)     PA=$((PA+1)) ;;
+            esac
+            V="$MA.$MI.$PA"
+            NEW=true
+          fi
+          if ! echo "$V" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then echo "Bad version '$V' (need MAJOR.MINOR.PATCH)"; exit 1; fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "new=$NEW" >> "$GITHUB_OUTPUT"
+          echo "Releasing $V"
+
+      - name: Unit tests
+        run: |
+          chmod +x gradlew
+          ./gradlew :shared:test --stacktrace
+
+      - name: Build APK
+        run: ./gradlew :app:assembleDebug -PappVersion=${{ steps.v.outputs.version }} --stacktrace
+
+      - name: Name the APK
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/*.apk "dist/RemoteControl-v${{ steps.v.outputs.version }}.apk"
+          ls -l dist
+
+      - name: Commit the new version and tag it
+        if: steps.v.outputs.new == 'true'
+        run: |
+          sed -i "s/^VERSION_NAME=.*/VERSION_NAME=${{ steps.v.outputs.version }}/" version.properties
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add version.properties
+          git commit -m "Release v${{ steps.v.outputs.version }}"
+          git tag "v${{ steps.v.outputs.version }}"
+          git push origin "HEAD:${{ github.ref_name }}" --tags
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RemoteControl-v${{ steps.v.outputs.version }}
+          path: dist/*.apk
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.v.outputs.version }}
+          name: Remote Control v${{ steps.v.outputs.version }}
+          body: ${{ inputs.notes }}
+          generate_release_notes: true
+          files: dist/*.apk

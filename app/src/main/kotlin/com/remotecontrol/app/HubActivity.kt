@@ -64,6 +64,12 @@ class HubActivity : Activity() {
             "Agent: shows a PIN for pairing, shares this phone's screen and carries out what the Controller sends.",
             com.remotecontrol.agent.MainActivity::class.java,
         )
+        val version = try { packageManager.getPackageInfo(packageName, 0).versionName } catch (e: Exception) { null }
+        col.addView(TextView(this).apply {
+            text = "Version ${version ?: "?"}"
+            textSize = 12f
+            gravity = Gravity.CENTER
+        })
         setContentView(ScrollView(this).apply { addView(col) })
     }
 }
