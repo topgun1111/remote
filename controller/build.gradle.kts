@@ -1,19 +1,16 @@
 plugins {
-    id("com.android.application")
+    id("com.android.library")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
+// Library module of the single "Remote Control" app (:app). Its manifest and resources are merged into the app.
 android {
     namespace = "com.remotecontrol.controller"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.remotecontrol.controller"
         minSdk = 26
-        targetSdk = 34
-        versionCode = 1001
-        versionName = "0.10.1"
     }
 
     compileOptions {

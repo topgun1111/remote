@@ -13,4 +13,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "RemoteControl"
-include(":shared", ":agent", ":controller")
+include(":shared", ":agent", ":controller", ":app")

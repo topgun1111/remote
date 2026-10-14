@@ -32,19 +32,14 @@
 
     <application
         android:allowBackup="false"
-        android:label="RC Agent"
         android:requestLegacyExternalStorage="true"
         android:theme="@android:style/Theme.Material.Light.DarkActionBar">
 
         <activity
             android:name=".MainActivity"
-            android:exported="true"
-            android:configChanges="orientation|screenSize|keyboardHidden">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:label="RC Agent" />
 
         <service
             android:name=".AgentService"
@@ -91,42 +86,12 @@
             </intent-filter>
         </receiver>
 
-        <!-- Setup screens (each has its own launcher icon) -->
-        <activity android:name=".WakeSetupActivity" android:exported="true" android:label="RC Wake Setup">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
-        <activity android:name=".LaunchSetupActivity" android:exported="true" android:label="RC Launch Setup">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
-        <activity android:name=".FilesSetupActivity" android:exported="true" android:label="RC Files Setup">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
-        <activity android:name=".RemoteSetupActivity" android:exported="true" android:label="RC Remote Setup">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
-        <activity android:name=".ReliabilitySetupActivity" android:exported="true" android:label="RC Reliability Setup">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
-        <activity android:name=".SecuritySetupActivity" android:exported="true" android:label="RC Security">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+        <!-- Setup screens (opened from the buttons on the Agent screen) -->
+        <activity android:name=".WakeSetupActivity" android:exported="false" android:label="RC Wake Setup" />
+        <activity android:name=".LaunchSetupActivity" android:exported="false" android:label="RC Launch Setup" />
+        <activity android:name=".FilesSetupActivity" android:exported="false" android:label="RC Files Setup" />
+        <activity android:name=".RemoteSetupActivity" android:exported="false" android:label="RC Remote Setup" />
+        <activity android:name=".ReliabilitySetupActivity" android:exported="false" android:label="RC Reliability Setup" />
+        <activity android:name=".SecuritySetupActivity" android:exported="false" android:label="RC Security" />
     </application>
 </manifest>

@@ -305,3 +305,4 @@ Window of 2 to 4 outstanding file reads over slow links; per-Controller stream p
   - `AppsPanel`: icon per row via `AppIconLoader` (start / stop on attach / detach), custom row instead of `simple_list_item_2`.
   - `ConnectionManager.targets(device)` added (used by Re-pair).
   - Still open: first CI build, on-device verification (all checklists), notes for Sessions 1 / 8c / 9a never uploaded.
+- **Session 11b — one app (not compiled; CI is the check).** New `app` module (`HubActivity`: choose Controller or Agent), `agent` / `controller` turned into library modules, launcher filters removed from their activities, `settings.gradle.kts` / root plugins / CI updated (single artifact `remotecontrol-debug-apk`), version 0.11.0. New application id: old pairings are not migrated. A phone can now act as Agent and Controller. Debug-only `InputTestActivity` has no icon (start via adb, see README).

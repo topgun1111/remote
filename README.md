@@ -1,10 +1,11 @@
 # RemoteControl — Session 8 complete (8d); Session 9 (a+b): remote access; Session 10 (a+b): reliability, security, settings
 
-Modules: `shared` (protocol), `agent` (controlled phone, WebSocket server), `controller` (WebSocket client).
+One app (`com.remotecontrol.app`, v0.11.0) with a start screen: **Control another phone** (Controller) or **Let this phone be controlled** (Agent).
+Modules: `app` (start screen, the only installable module), `shared` (protocol), `agent` (controlled phone, WebSocket server; library), `controller` (WebSocket client; library).
 
 ## Run
 1. Open this folder in Android Studio (Hedgehog or newer, JDK 17). Let Gradle sync.
-2. Install `agent` on the controlled phone, `controller` on the other. Both on the same WiFi.
+2. Install the app on both phones, same WiFi. On the controlled phone open the app and choose **Let this phone be controlled**; on the other choose **Control another phone**. (Back from either screen returns to the start screen.)
 3. Agent: tap **Start Agent**, allow notifications. The screen shows `IP:port` and a 6-digit **PIN**.
 4. Controller: under **Add device** enter the IP (and port), the PIN, tap **Pair**.
 5. From then on the Controller remembers the Agent: it appears under **Paired devices**, reconnects
@@ -93,9 +94,9 @@ Manual wiring (`ConnectionManager`, device list, `ACCESS_NETWORK_STATE`) and the
 `./gradlew :shared:test` runs the pairing/protocol unit tests (pure JVM, no device needed).
 
 ## GitHub Actions
-`.github/workflows/build.yml` builds both debug APKs on every push/PR and uploads them as
-artifacts (Actions tab -> run -> Artifacts: `agent-debug-apk`, `controller-debug-apk`).
-Push a tag like `v0.1` to also attach the APKs to a GitHub Release.
+`.github/workflows/build.yml` builds the debug APK on every push/PR and uploads it as
+an artifact (Actions tab -> run -> Artifacts: `remotecontrol-debug-apk`).
+Push a tag like `v0.1` to also attach the APK to a GitHub Release.
 Debug APKs are signed with the auto-generated debug key, so they sideload directly.
 
 ## Reliability (Session 10a)
@@ -120,3 +121,5 @@ All source code of the ten sessions is now in this tree and wired together (Sess
 3. Notes for Sessions 1, 8c and 9a were never uploaded; their behaviour is described in `remote-control-app-plan.md`.
 
 Details: **Remaining Work** in `remote-control-app-plan.md`.
+
+Note: the single app has a new application id, so pairings, tokens and settings of the old separate Agent / Controller apps are not carried over (pair again). Debug builds also contain the input test screen: `adb shell am start -n com.remotecontrol.app/com.remotecontrol.agent.InputTestActivity`.

@@ -1,15 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Debug builds only: a test launcher for input injection. The accessibility service itself is in the main manifest. -->
+<!-- Debug builds only: a test screen for input injection (no launcher icon; the app has a single icon).
+     Start it with: adb shell am start -n com.remotecontrol.app/com.remotecontrol.agent.InputTestActivity -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
         <activity
             android:name="com.remotecontrol.agent.InputTestActivity"
             android:exported="true"
-            android:label="RC Input Test">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+            android:label="RC Input Test" />
     </application>
 </manifest>

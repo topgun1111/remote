@@ -28,6 +28,9 @@ compiler plugin and are expected to pass in CI. The first CI run is the real com
 - `ConnectionManager.targets(device)` added. README "What is left" and the plan's Remaining Work + Status Log updated.
 - STILL NOT compiled (no Android SDK / Maven in the sandbox): any compile error is expected to show up in the first CI run.
 
+## Single app (Session 11b)
+`agent` and `controller` are now Android **library** modules (no applicationId); new module `app` (`com.remotecontrol.app`, 0.11.0, versionCode 1100) has `HubActivity`, the only launcher screen, which opens `controller.MainActivity` or `agent.MainActivity`. Launcher intent-filters were removed from both MainActivities and the six Agent setup activities (all `exported=false`, reached from in-app buttons). CI uploads one artifact. Watch for in the first build: manifest-merger conflicts and duplicate META-INF resources (excludes are set in `app/build.gradle.kts`).
+
 ## STILL TO DO (in this order)
 1. Push to GitHub, run Actions, fix compile errors from the first build (`./gradlew :shared:test assembleDebug`).
 2. On-device verification checklists in each SESSION*-INTEGRATION.md (never run for 6, 8b to 10b).
@@ -39,5 +42,5 @@ compiler plugin and are expected to pass in CI. The first CI run is the real com
 - Agent: `FOREGROUND_SERVICE` start refused by Android posts a tap-to-start notification (AgentService.promote).
 
 ## Push to GitHub
-git init && git add . && git commit -m "RemoteControl 0.10.1" && git branch -M main && git remote add origin <url> && git push -u origin main
-APKs appear under Actions -> run -> Artifacts (`agent-debug-apk`, `controller-debug-apk`); tag `v0.10.1` also attaches them to a Release.
+git init && git add . && git commit -m "RemoteControl 0.11.0" && git branch -M main && git remote add origin <url> && git push -u origin main
+The APK appears under Actions -> run -> Artifacts (`remotecontrol-debug-apk`); tag `v0.11.0` also attaches it to a Release.
